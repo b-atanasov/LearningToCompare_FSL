@@ -32,16 +32,16 @@ class FewShotDataset(Dataset):
 
 
 class TaskSampler:
-    def __init__(self, metadataset_folder, num_classes, train_num, test_num):
+    def __init__(self, metadataset_folder, class_num, train_num, test_num):
         self.metadataset_folder = metadataset_folder
-        self.num_classes = num_classes
+        self.class_num = class_num
         self.train_num = train_num
         self.test_num = test_num
         random.seed(1)
         self.img_class_paths = self.__get_img_class_paths()
         self.__display_num_combinations()
         
-    def __get_img_class_paths(self):        
+    def __get_img_class_paths(self):
         img_class_paths = []
         for label in os.listdir(self.metadataset_folder):
             paths = os.path.join(self.metadataset_folder, label)
@@ -52,8 +52,8 @@ class TaskSampler:
         return img_class_paths
     
     def __display_num_combinations(self):
-        num_combinations = int(binom(len(self.img_class_paths), self.num_classes))
-        print(f'Number of {self.num_classes}-combinations from a set of {len(self.img_class_paths)}',
+        num_combinations = int(binom(len(self.img_class_paths), self.class_num))
+        print(f'Number of {self.class_num}-combinations from a set of {len(self.img_class_paths)}',
               f'classes in {os.path.basename(self.metadataset_folder)}: {num_combinations}')
     
     def sample_task_data(self):
@@ -68,7 +68,7 @@ class TaskSampler:
         return sample_dataloader, batch_dataloader    
     
     def __sample_image_classes(self):
-        class_folders = random.sample(self.img_class_paths, self.num_classes)
+        class_folders = random.sample(self.img_class_paths, self.class_num)
         return class_folders
     
     def __sample_images(self, class_folders):
@@ -86,7 +86,7 @@ class TaskSampler:
         return train_roots, test_roots
     
     def __get_labels_index(self, class_folders):
-        return dict(zip(class_folders, range(self.num_classes)))
+        return dict(zip(class_folders, range(self.class_num)))
     
     def __get_labels(self, roots, labels_index):
         return [labels_index[os.path.dirname(root)] for root in roots]
@@ -94,6 +94,6 @@ class TaskSampler:
     def __get_data_loader(self, image_roots, labels, num_per_class, split, shuffle):
         normalize = transforms.Normalize(mean=[0.92206, 0.92206, 0.92206], std=[0.08426, 0.08426, 0.08426])
         dataset = FewShotDataset(image_roots, labels, transform=transforms.Compose([transforms.ToTensor(), normalize]))
-        loader = DataLoader(dataset, batch_size=num_per_class*self.num_classes, shuffle=shuffle)
+        loader = DataLoader(dataset, batch_size=num_per_class*self.class_num, shuffle=shuffle)
         return loader
         

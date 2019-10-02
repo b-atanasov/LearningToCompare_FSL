@@ -20,13 +20,13 @@ def train_episode(model, sample_dataloader, batch_dataloader, device, criterion,
     model.train()
     relations = model(samples, batches)
 
-    one_hot_labels = torch.zeros(batch_labels.size()[0], batch_labels.unique().size()[0]).scatter_(1, batch_labels.view(-1,1), 1).to(device)
+    one_hot_labels = torch.zeros(batch_labels.size()[0], batch_labels.unique().size()[0]).scatter_(1, batch_labels.view(-1, 1), 1).to(device)
     loss = criterion(relations, one_hot_labels)
 
     model.zero_grad()
     loss.backward()
     torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
-    optimizer.step()    
+    optimizer.step()
     lr_scheduler.step(episode)
     return loss
 
@@ -40,7 +40,7 @@ def test_episode(model, sample_dataloader, test_dataloader, device):
     total_predictions = 0
     for test_images, test_labels in test_dataloader:
         test_images, test_labels = test_images.to(device), test_labels.to(device)
-        
+
         predicted_labels = model.forward(sample_images, test_images)
         predicted_labels = predicted_labels.argmax(1)
 
@@ -57,11 +57,11 @@ def meta_test(model, task_sampler, device, episodes):
     accuracies = []
     model.eval()
     with torch.no_grad():
-        for i in range(episodes):                
+        for i in range(episodes):
             sample_dataloader, test_dataloader = task_sampler.sample_task_data()
             accuracy = test_episode(model, sample_dataloader, test_dataloader, device)
             accuracies.append(accuracy)
-        
+
     test_accuracy = np.array(accuracies).mean()
     print("test accuracy:", test_accuracy)
     return test_accuracy
@@ -72,14 +72,14 @@ def meta_train(model, train_task_sampler, eval_task_sampler, device, criterion, 
 
     last_accuracy = 0.0
 
-    for episode in range(train_episodes):        
+    for episode in range(train_episodes):
         sample_dataloader, batch_dataloader = train_task_sampler.sample_task_data()
         loss = train_episode(model, sample_dataloader, batch_dataloader, device, criterion, optimizer, lr_scheduler, episode)
 
-        if (episode + 1)%100 == 0:
+        if (episode + 1) % 100 == 0:
             print(f'episode: {episode + 1} loss {loss.data.item()}')
 
-        if (episode + 1)%5000 == 0:
+        if (episode + 1) % 5000 == 0:
             eval_accuracy = meta_test(model, eval_task_sampler, device, eval_episodes)
 
             if eval_accuracy > last_accuracy:
@@ -88,7 +88,7 @@ def meta_train(model, train_task_sampler, eval_task_sampler, device, criterion, 
                 last_accuracy = eval_accuracy
 
 
-def main():
+def parse_args():
     parser = argparse.ArgumentParser(description='Few Shot Image Recognition')
     parser.add_argument('--feature_dim', type=int, default=64)
     parser.add_argument('--relation_dim', type=int, default=8)
@@ -106,52 +106,42 @@ def main():
     parser.add_argument('--test_folder', type=str)
     args = parser.parse_args()
 
-    FEATURE_DIM = args.feature_dim
-    RELATION_DIM = args.relation_dim
-    CLASS_NUM = args.class_num
-    SAMPLE_NUM_PER_CLASS = args.sample_num_per_class
-    BATCH_NUM_PER_CLASS = args.batch_num_per_class
-    TEST_BATCH_NUM_PER_CLASS = args.test_batch_num_per_class
-    EPISODE = args.episode
-    TEST_EPISODE = args.test_episode
-    LEARNING_RATE = args.learning_rate
-    DISABLE_CUDA = args.disable_cuda
-    INPUT_CHANNELS = args.input_channels
-    MODEL_NAME = args.model_name
-    STATE_FILE = os.path.join("models", f"{MODEL_NAME}_{CLASS_NUM}way_{SAMPLE_NUM_PER_CLASS}shot.pkl")
-    TRAIN_FOLDER = args.train_folder
-    TEST_FOLDER = args.test_folder
+    args.state_file = os.path.join("models", f"{args.model_name}_{args.class_num}way_{args.sample_num_per_class}shot.pkl")
+    return args
 
-    device = torch.device("cuda") if not DISABLE_CUDA and torch.cuda.is_available() else torch.device("cpu")
 
-    feature_encoder = rln.CNNEncoder(INPUT_CHANNELS, FEATURE_DIM)
-    relation_module = rln.RelationModule(RELATION_DIM, FEATURE_DIM)
+def main(args):
+    device = torch.device("cuda") if not args.disable_cuda and torch.cuda.is_available() else torch.device("cpu")
 
-    relation_network = rln.RelationNetwork(feature_encoder, relation_module, CLASS_NUM, SAMPLE_NUM_PER_CLASS, BATCH_NUM_PER_CLASS)
+    feature_encoder = rln.CNNEncoder(args.input_channels, args.feature_dim)
+    relation_module = rln.RelationModule(args.relation_dim, args.feature_dim)
+
+    relation_network = rln.RelationNetwork(feature_encoder, relation_module, args.class_num, args.sample_num_per_class, args.batch_num_per_class)
     relation_network = relation_network.to(device)
 
     try:
-        relation_network.load_state_dict(torch.load(STATE_FILE))
+        relation_network.load_state_dict(torch.load(args.state_file))
         print("load state success")
     except OSError:
         pass
 
-    is_train_mode = TRAIN_FOLDER is not None and TEST_FOLDER is not None
-    is_test_mode = TRAIN_FOLDER is None and TEST_FOLDER is not None
+    is_train_mode = args.train_folder is not None and args.test_folder is not None
+    is_test_mode = args.train_folder is None and args.test_folder is not None
 
     if is_train_mode:
         mse = nn.MSELoss().to(device)
-        optimizer = torch.optim.Adam(relation_network.parameters(),lr=LEARNING_RATE)
+        optimizer = torch.optim.Adam(relation_network.parameters(), lr=args.learning_rate)
         lr_scheduler = StepLR(optimizer, step_size=100000, gamma=0.5)
 
-        train_task_sampler = tg.TaskSampler(TRAIN_FOLDER, CLASS_NUM, SAMPLE_NUM_PER_CLASS, BATCH_NUM_PER_CLASS)
-        test_task_sampler = tg.TaskSampler(TEST_FOLDER, CLASS_NUM, SAMPLE_NUM_PER_CLASS, TEST_BATCH_NUM_PER_CLASS)
+        train_task_sampler = tg.TaskSampler(args.train_folder, args.class_num, args.sample_num_per_class, args.batch_num_per_class)
+        test_task_sampler = tg.TaskSampler(args.test_folder, args.class_num, args.sample_num_per_class, args.test_batch_num_per_class)
 
-        meta_train(relation_network, train_task_sampler, test_task_sampler, device, mse, optimizer, lr_scheduler, EPISODE, TEST_EPISODE, STATE_FILE)
+        meta_train(relation_network, train_task_sampler, test_task_sampler, device, mse, optimizer, lr_scheduler, args.episode, args.test_episode, args.state_file)
     elif is_test_mode:
-        test_task_sampler = tg.TaskSampler(TEST_FOLDER, CLASS_NUM, SAMPLE_NUM_PER_CLASS, TEST_BATCH_NUM_PER_CLASS)
-        meta_test(relation_network, test_task_sampler, device, TEST_EPISODE)
+        test_task_sampler = tg.TaskSampler(args.test_folder, args.class_num, args.sample_num_per_class, args.test_batch_num_per_class)
+        meta_test(relation_network, test_task_sampler, device, args.test_episode)
 
 
 if __name__ == '__main__':
-    main()
+    args = parse_args()
+    main(args)

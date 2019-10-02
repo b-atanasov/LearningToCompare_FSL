@@ -54,13 +54,13 @@ class RelationModule(nn.Module):
 
 
 class RelationNetwork(nn.Module):
-    def __init__(self, encoder, relation_module, class_num, sample_num_per_class, query_num_per_class):
+    def __init__(self, encoder, relation_module, class_num, sample_num_per_class, batch_num_per_class):
         super().__init__()
         self.encoder = encoder
         self.relation_module = relation_module
         self.class_num = class_num
         self.sample_num_per_class = sample_num_per_class
-        self.query_num_per_class = query_num_per_class
+        self.query_num_per_class = batch_num_per_class
         
     def forward(self, sample, query):
         sample_features = self.encoder(sample)

@@ -16,13 +16,13 @@ Look at the [original repo readme](https://github.com/floodsung/LearningToCompar
 Train 5-way 5-shot on mini-ImageNet:
 
 ```
-python run.py --train_folder datas/miniImagenet/train --test_folder datas/miniImagenet/val --class_num 5 --sample_num_per_class 5
+python main.py --train_folder datas/miniImagenet/train --test_folder datas/miniImagenet/val --class_num 5 --sample_num_per_class 5
 ```
 
 Test 5-way 5-shot on mini-ImageNet:
 
 ```
-python run.py --test_folder datas/miniImagenet/test --class_num 5 --sample_num_per_class 5
+python main.py --test_folder datas/miniImagenet/test --class_num 5 --sample_num_per_class 5
 ```
 
 ## Reference
