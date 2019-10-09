@@ -19,6 +19,12 @@ Train 5-way 5-shot on mini-ImageNet:
 python main.py --train_folder datas/miniImagenet/train --test_folder datas/miniImagenet/val --class_num 5 --sample_num_per_class 5
 ```
 
+Resume training from a checkpoint:
+
+```
+python main.py --train_folder datas/miniImagenet/train --test_folder datas/miniImagenet/val --class_num 5 --sample_num_per_class 5 --resume checkpoints/checkpoint_default_5way_5shot.tar
+```
+
 Test 5-way 5-shot on mini-ImageNet:
 
 ```

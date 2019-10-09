@@ -31,6 +31,37 @@ def train_episode(model, sample_dataloader, batch_dataloader, device, criterion,
     return loss
 
 
+def save_checkpoint(model, optimizer, lr_scheduler, episode, args):
+    checkpoint = {'model': model.state_dict(),
+                  'optimizer': optimizer.state_dict(),
+                  'lr_scheduler': lr_scheduler.state_dict(),
+                  'episode': episode,
+                  'args': args}
+    torch.save(checkpoint, args.checkpoint_file)
+
+
+def load_checkpoint(model, optimizer, lr_scheduler, args):
+    checkpoint = torch.load(args.resume)
+    model.load_state_dict(checkpoint['model'])
+    optimizer.load_state_dict(checkpoint['optimizer'])
+    lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
+    args.start_episode = checkpoint['episode'] + 1
+    print(f'Checkpoint at episode {checkpoint["episode"]} loaded')
+
+
+def save_best(model, args, accuracy):
+    checkpoint = {'model': model.state_dict(),
+                  'args': args,
+                  'accuracy': accuracy}
+    torch.save(checkpoint, args.best_model_file)
+
+
+def load_best(model, args):
+    state = torch.load(args.best_model_file)
+    model.load_state_dict(state['model'])
+    print('Best model loaded')
+
+
 def test_episode(model, sample_dataloader, test_dataloader, device):
     sample_images, sample_labels = sample_dataloader.__iter__().next()
 
@@ -67,25 +98,28 @@ def meta_test(model, task_sampler, device, episodes):
     return test_accuracy
 
 
-def meta_train(model, train_task_sampler, eval_task_sampler, device, criterion, optimizer, lr_scheduler, train_episodes, eval_episodes, model_state_file):
+def meta_train(model, train_task_sampler, eval_task_sampler, device, criterion, optimizer, lr_scheduler, args):
     print(f"Training on {device}...")
 
-    last_accuracy = 0.0
+    try:
+        best_accuracy = torch.load(args.best_model_file)['accuracy']
+    except OSError:
+        best_accuracy = 0.0
 
-    for episode in range(train_episodes):
+    for episode in range(args.start_episode, args.train_episodes):
         sample_dataloader, batch_dataloader = train_task_sampler.sample_task_data()
         loss = train_episode(model, sample_dataloader, batch_dataloader, device, criterion, optimizer, lr_scheduler, episode)
+        save_checkpoint(model, optimizer, lr_scheduler, episode, args)
 
-        if (episode + 1) % 100 == 0:
-            print(f'episode: {episode + 1} loss {loss.data.item()}')
+        if episode % 100 == 0:
+            print(f'episode: {episode} loss {loss.data.item()}')
 
-        if (episode + 1) % 5000 == 0:
-            eval_accuracy = meta_test(model, eval_task_sampler, device, eval_episodes)
+        if episode % 5000 == 0:
+            eval_accuracy = meta_test(model, eval_task_sampler, device, args.test_episodes)
 
-            if eval_accuracy > last_accuracy:
-                torch.save(model.state_dict(), model_state_file)
-                print("save networks for episode:", episode)
-                last_accuracy = eval_accuracy
+            if eval_accuracy > best_accuracy:
+                save_best(model, args, eval_accuracy)
+                best_accuracy = eval_accuracy
 
 
 def parse_args():
@@ -96,22 +130,30 @@ def parse_args():
     parser.add_argument('--sample_num_per_class', type=int, default=5)
     parser.add_argument('--batch_num_per_class', type=int, default=10)
     parser.add_argument('--test_batch_num_per_class', type=int, default=15)
-    parser.add_argument('--episode', type=int, default=500000)
-    parser.add_argument('--test_episode', type=int, default=600)
+    parser.add_argument('--train_episodes', type=int, default=500000)
+    parser.add_argument('--test_episodes', type=int, default=600)
     parser.add_argument('-lr', '--learning_rate', type=float, default=0.001)
     parser.add_argument('--disable_cuda', action='store_true')
     parser.add_argument('--input_channels', type=int, default=3)
     parser.add_argument('--model_name', type=str, default='default')
     parser.add_argument('--train_folder', type=str)
     parser.add_argument('--test_folder', type=str)
+    parser.add_argument('--resume', type=str, default='', help='resume from checkpoint')
+    parser.add_argument('--start_episode', type=int, default=0)
     args = parser.parse_args()
 
-    args.state_file = os.path.join("models", f"{args.model_name}_{args.class_num}way_{args.sample_num_per_class}shot.pkl")
+    args.checkpoint_file = os.path.join("checkpoints", f"checkpoint_{args.model_name}_{args.class_num}way_{args.sample_num_per_class}shot.tar")
+    args.best_model_file = os.path.join("checkpoints", f"best_{args.model_name}_{args.class_num}way_{args.sample_num_per_class}shot.pt")
     return args
 
 
 def main(args):
     device = torch.device("cuda") if not args.disable_cuda and torch.cuda.is_available() else torch.device("cpu")
+
+    # import torchvision.models as models
+    # resnet18 = models.resnet18()
+    # feature_encoder = nn.Sequential(*list(resnet18.children())[:-3])
+    # relation_module = rln.RelationModule(args.relation_dim, 256, args.feature_dim)
 
     feature_encoder = rln.CNNEncoder(args.input_channels, args.feature_dim)
     relation_module = rln.RelationModule(args.relation_dim, args.feature_dim)
@@ -119,27 +161,26 @@ def main(args):
     relation_network = rln.RelationNetwork(feature_encoder, relation_module, args.class_num, args.sample_num_per_class, args.batch_num_per_class)
     relation_network = relation_network.to(device)
 
-    try:
-        relation_network.load_state_dict(torch.load(args.state_file))
-        print("load state success")
-    except OSError:
-        pass
-
     is_train_mode = args.train_folder is not None and args.test_folder is not None
     is_test_mode = args.train_folder is None and args.test_folder is not None
 
     if is_train_mode:
-        mse = nn.MSELoss().to(device)
         optimizer = torch.optim.Adam(relation_network.parameters(), lr=args.learning_rate)
         lr_scheduler = StepLR(optimizer, step_size=100000, gamma=0.5)
+
+        if args.resume:
+            load_checkpoint(relation_network, optimizer, lr_scheduler, args)
+
+        mse = nn.MSELoss().to(device)
 
         train_task_sampler = tg.TaskSampler(args.train_folder, args.class_num, args.sample_num_per_class, args.batch_num_per_class)
         test_task_sampler = tg.TaskSampler(args.test_folder, args.class_num, args.sample_num_per_class, args.test_batch_num_per_class)
 
-        meta_train(relation_network, train_task_sampler, test_task_sampler, device, mse, optimizer, lr_scheduler, args.episode, args.test_episode, args.state_file)
+        meta_train(relation_network, train_task_sampler, test_task_sampler, device, mse, optimizer, lr_scheduler, args)
     elif is_test_mode:
+        load_best(relation_network, args)
         test_task_sampler = tg.TaskSampler(args.test_folder, args.class_num, args.sample_num_per_class, args.test_batch_num_per_class)
-        meta_test(relation_network, test_task_sampler, device, args.test_episode)
+        meta_test(relation_network, test_task_sampler, device, args.test_episodes)
 
 
 if __name__ == '__main__':
