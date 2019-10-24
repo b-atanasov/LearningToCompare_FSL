@@ -10,18 +10,23 @@ import task_generator as tg
 import relation_network as rln
 
 
-def train_episode(model, sample_dataloader, batch_dataloader, device, criterion, optimizer, lr_scheduler, episode):
+def train_episode(model, sample_dataloader, batch_dataloader, device, criterion, optimizer,
+                  lr_scheduler, episode, args):
     samples, sample_labels = sample_dataloader.__iter__().next()
     batches, batch_labels = batch_dataloader.__iter__().next()
 
     samples = samples.to(device)
     batches = batches.to(device)
+    batch_labels = batch_labels.to(device)
 
     model.train()
     relations = model(samples, batches)
 
-    one_hot_labels = torch.zeros(batch_labels.size()[0], batch_labels.unique().size()[0]).scatter_(1, batch_labels.view(-1, 1), 1).to(device)
-    loss = criterion(relations, one_hot_labels)
+    if args.loss_type == 'mse':
+        one_hot_labels = torch.zeros(batch_labels.size()[0], batch_labels.unique().size()[0]).scatter_(1, batch_labels.view(-1, 1), 1)
+        loss = criterion(relations, one_hot_labels)
+    else:
+        loss = criterion(relations, batch_labels)
 
     model.zero_grad()
     loss.backward()
@@ -111,7 +116,8 @@ def meta_train(model, train_task_sampler, eval_task_sampler, device, criterion, 
 
     for episode in range(args.start_episode, args.train_episodes):
         sample_dataloader, batch_dataloader = train_task_sampler.sample_task_data()
-        loss = train_episode(model, sample_dataloader, batch_dataloader, device, criterion, optimizer, lr_scheduler, episode)
+        loss = train_episode(model, sample_dataloader, batch_dataloader, device, criterion,
+                             optimizer, lr_scheduler, episode, args)
 
         if (episode % 100 == 0) and (episode > 0):
             save_checkpoint(model, optimizer, lr_scheduler, episode, args)
@@ -130,6 +136,7 @@ def parse_args():
     parser.add_argument('--backbone', type=str, choices=['Conv4', 'ResNet18'], default='ResNet18')
     parser.add_argument('--img_size', type=int, choices=[84, 224], default=84,
                         help='input images will be cropped to this size')
+    parser.add_argument('--loss_type', type=str, choices=['mse', 'cross-entropy'], default='mse')
     parser.add_argument('--class_num', type=int, default=5)
     parser.add_argument('--sample_num_per_class', type=int, default=5)
     parser.add_argument('--batch_num_per_class', type=int, default=10)
@@ -167,12 +174,15 @@ def main(args):
         if args.resume:
             load_checkpoint(relation_network, optimizer, lr_scheduler, args)
 
-        mse = nn.MSELoss().to(device)
+        if args.loss_type == 'mse':
+            criterion = nn.MSELoss().to(device)
+        else:
+            criterion = nn.CrossEntropyLoss().to(device)
 
         train_task_sampler = tg.TaskSampler(args, train=True)
         test_task_sampler = tg.TaskSampler(args, train=False)
 
-        meta_train(relation_network, train_task_sampler, test_task_sampler, device, mse, optimizer, lr_scheduler, args)
+        meta_train(relation_network, train_task_sampler, test_task_sampler, device, criterion, optimizer, lr_scheduler, args)
     elif is_test_mode:
         load_best(relation_network, args)
         test_task_sampler = tg.TaskSampler(args, train=False)

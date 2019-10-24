@@ -51,39 +51,42 @@ class CNNEncoder(nn.Module):
 
 
 class RelationModuleOriginal(nn.Module):
-    def __init__(self, conv_depth, img_size):
+    def __init__(self, conv_depth, args):
         super().__init__()
         hidden_size = 8
         self.layer1 = ConvLayer(2*conv_depth, conv_depth)
         self.layer2 = ConvLayer(conv_depth, conv_depth)
-        if img_size == 224:
+        if args.img_size == 224:
             fc1_in = conv_depth * 12 * 12
-        elif img_size == 84:
+        elif args.img_size == 84:
             fc1_in = conv_depth * 3 * 3
         self.fc1 = nn.Linear(fc1_in, hidden_size)
         self.fc2 = nn.Linear(hidden_size, 1)
         for m in self.modules():
             initialize_weights(m)
+        self.loss_type = args.loss_type
 
     def forward(self, x):
         out = self.layer1(x)
         out = self.layer2(out)
         out = out.view(out.size(0), -1)
         out = F.relu(self.fc1(out))
-        out = torch.sigmoid(self.fc2(out))
+        out = self.fc2(out)
+        if self.loss_type == 'mse':
+            out = torch.sigmoid(out)
         return out
 
 
 class RelationModule(nn.Module):
-    def __init__(self, conv_depth, img_size):
+    def __init__(self, conv_depth, args):
         super().__init__()
         resnet = models.ResNet(models.resnet.BasicBlock, [2, 2, 2, 2])
         resnet.inplanes = 2 * conv_depth
         self.layer1 = resnet._make_layer(models.resnet.BasicBlock, planes=128, blocks=2, stride=2)
         self.layer2 = resnet._make_layer(models.resnet.BasicBlock, planes=64, blocks=2, stride=1)
-        if img_size == 224:
+        if args.img_size == 224:
             fc1_in = 64 * 7 * 7
-        elif img_size == 84:
+        elif args.img_size == 84:
             fc1_in = 64 * 3 * 3
         fc1_out = fc1_in // 2
         self.fc1 = nn.Linear(fc1_in, fc1_out)
@@ -91,6 +94,7 @@ class RelationModule(nn.Module):
         self.fc2 = nn.Linear(fc1_out, 1)
         for m in self.modules():
             initialize_weights(m)
+        self.loss_type = args.loss_type
 
     def forward(self, x):
         out = self.layer1(x)
@@ -99,7 +103,9 @@ class RelationModule(nn.Module):
         out = self.fc1(out)
         # out = self.batch_norm(out)
         out = F.relu(out)
-        out = torch.sigmoid(self.fc2(out))
+        out = self.fc2(out)
+        if self.loss_type == 'mse':
+            out = torch.sigmoid(out)
         return out
 
 
@@ -123,9 +129,9 @@ class RelationNetwork(nn.Module):
         encoder_output_channels = [m.out_channels for m in self.encoder.modules()
                                    if isinstance(m, nn.Conv2d)][-1]
         if args.backbone == 'ResNet18':
-            return RelationModule(encoder_output_channels, args.img_size)
+            return RelationModule(encoder_output_channels, args)
         elif args.backbone == 'Conv4':
-            return RelationModuleOriginal(encoder_output_channels, args.img_size)
+            return RelationModuleOriginal(encoder_output_channels, args)
 
     def forward(self, sample, query):
         sample_features = self.encoder(sample)
