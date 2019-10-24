@@ -101,20 +101,23 @@ def meta_test(model, task_sampler, device, episodes):
 def meta_train(model, train_task_sampler, eval_task_sampler, device, criterion, optimizer, lr_scheduler, args):
     print(f"Training on {device}...")
 
-    try:
-        best_accuracy = torch.load(args.best_model_file)['accuracy']
-    except OSError:
+    if args.resume:
+        try:
+            best_accuracy = torch.load(args.best_model_file)['accuracy']
+        except OSError:
+            best_accuracy = 0.0
+    else:
         best_accuracy = 0.0
 
     for episode in range(args.start_episode, args.train_episodes):
         sample_dataloader, batch_dataloader = train_task_sampler.sample_task_data()
         loss = train_episode(model, sample_dataloader, batch_dataloader, device, criterion, optimizer, lr_scheduler, episode)
-        save_checkpoint(model, optimizer, lr_scheduler, episode, args)
 
-        if episode % 100 == 0:
+        if (episode % 100 == 0) and (episode > 0):
+            save_checkpoint(model, optimizer, lr_scheduler, episode, args)
             print(f'episode: {episode} loss {loss.data.item()}')
 
-        if episode % 5000 == 0:
+        if (episode % 5000 == 0) and (episode > 0):
             eval_accuracy = meta_test(model, eval_task_sampler, device, args.test_episodes)
 
             if eval_accuracy > best_accuracy:
@@ -124,8 +127,9 @@ def meta_train(model, train_task_sampler, eval_task_sampler, device, criterion, 
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Few Shot Image Recognition')
-    parser.add_argument('--feature_dim', type=int, default=64)
-    parser.add_argument('--relation_dim', type=int, default=8)
+    parser.add_argument('--backbone', type=str, choices=['Conv4', 'ResNet18'], default='ResNet18')
+    parser.add_argument('--img_size', type=int, choices=[84, 224], default=84,
+                        help='input images will be cropped to this size')
     parser.add_argument('--class_num', type=int, default=5)
     parser.add_argument('--sample_num_per_class', type=int, default=5)
     parser.add_argument('--batch_num_per_class', type=int, default=10)
@@ -150,15 +154,7 @@ def parse_args():
 def main(args):
     device = torch.device("cuda") if not args.disable_cuda and torch.cuda.is_available() else torch.device("cpu")
 
-    # import torchvision.models as models
-    # resnet18 = models.resnet18()
-    # feature_encoder = nn.Sequential(*list(resnet18.children())[:-3])
-    # relation_module = rln.RelationModule(args.relation_dim, 256, args.feature_dim)
-
-    feature_encoder = rln.CNNEncoder(args.input_channels, args.feature_dim)
-    relation_module = rln.RelationModule(args.relation_dim, args.feature_dim)
-
-    relation_network = rln.RelationNetwork(feature_encoder, relation_module, args.class_num, args.sample_num_per_class, args.batch_num_per_class)
+    relation_network = rln.RelationNetwork(args)
     relation_network = relation_network.to(device)
 
     is_train_mode = args.train_folder is not None and args.test_folder is not None
@@ -173,13 +169,13 @@ def main(args):
 
         mse = nn.MSELoss().to(device)
 
-        train_task_sampler = tg.TaskSampler(args.train_folder, args.class_num, args.sample_num_per_class, args.batch_num_per_class)
-        test_task_sampler = tg.TaskSampler(args.test_folder, args.class_num, args.sample_num_per_class, args.test_batch_num_per_class)
+        train_task_sampler = tg.TaskSampler(args, train=True)
+        test_task_sampler = tg.TaskSampler(args, train=False)
 
         meta_train(relation_network, train_task_sampler, test_task_sampler, device, mse, optimizer, lr_scheduler, args)
     elif is_test_mode:
         load_best(relation_network, args)
-        test_task_sampler = tg.TaskSampler(args.test_folder, args.class_num, args.sample_num_per_class, args.test_batch_num_per_class)
+        test_task_sampler = tg.TaskSampler(args, train=False)
         meta_test(relation_network, test_task_sampler, device, args.test_episodes)
 
 

@@ -9,14 +9,14 @@ The code in this implementation is considerably reorganized, updated to PyTorch 
 
 ## Data
 
-Look at the [original repo readme](https://github.com/floodsung/LearningToCompare_FSL#data) for instructions on how to obtain and preprocess the data. 
+Look at the [original repo readme](https://github.com/floodsung/LearningToCompare_FSL#data) for instructions on how to obtain and preprocess the mini-ImageNet. 
 
 ## Usage
 
 Train 5-way 5-shot on mini-ImageNet:
 
 ```
-python main.py --train_folder datas/miniImagenet/train --test_folder datas/miniImagenet/val --class_num 5 --sample_num_per_class 5
+python main.py --train_folder datas/miniImagenet/train --test_folder datas/miniImagenet/val --class_num 5 --sample_num_per_class 5 --backbone ResNet18 --img_size 224
 ```
 
 Resume training from a checkpoint:

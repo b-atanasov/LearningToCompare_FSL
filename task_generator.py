@@ -32,11 +32,13 @@ class FewShotDataset(Dataset):
 
 
 class TaskSampler:
-    def __init__(self, metadataset_folder, class_num, train_num, test_num):
-        self.metadataset_folder = metadataset_folder
-        self.class_num = class_num
-        self.train_num = train_num
-        self.test_num = test_num
+    def __init__(self, args, train=True):
+        self.metadataset_folder = args.train_folder if train else args.test_folder
+        self.class_num = args.class_num
+        self.train_num = args.sample_num_per_class
+        self.test_num = args.batch_num_per_class if train else args.test_batch_num_per_class
+        self.img_size = args.img_size
+        
         random.seed(1)
         self.img_class_paths = self.__get_img_class_paths()
         self.__display_num_combinations()
@@ -92,8 +94,12 @@ class TaskSampler:
         return [labels_index[os.path.dirname(root)] for root in roots]
     
     def __get_data_loader(self, image_roots, labels, num_per_class, split, shuffle):
-        normalize = transforms.Normalize(mean=[0.92206, 0.92206, 0.92206], std=[0.08426, 0.08426, 0.08426])
-        dataset = FewShotDataset(image_roots, labels, transform=transforms.Compose([transforms.ToTensor(), normalize]))
+        ds_transforms = transforms.Compose([transforms.RandomResizedCrop(self.img_size),
+                                            transforms.RandomHorizontalFlip(),
+                                            transforms.ToTensor(),
+                                            transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                                                 std=[0.229, 0.224, 0.225])])
+        dataset = FewShotDataset(image_roots, labels, transform=ds_transforms)
         loader = DataLoader(dataset, batch_size=num_per_class*self.class_num, shuffle=shuffle)
         return loader
         
