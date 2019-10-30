@@ -1,5 +1,7 @@
 import argparse
+from functools import partial
 import os
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -8,6 +10,7 @@ import numpy as np
 
 import task_generator as tg
 import relation_network as rln
+from utils import Checkpoint
 
 
 def train_episode(model, sample_dataloader, batch_dataloader, device, criterion, optimizer,
@@ -17,15 +20,15 @@ def train_episode(model, sample_dataloader, batch_dataloader, device, criterion,
 
     samples = samples.to(device)
     batches = batches.to(device)
-    batch_labels = batch_labels.to(device)
 
     model.train()
     relations = model(samples, batches)
 
     if args.loss_type == 'mse':
-        one_hot_labels = torch.zeros(batch_labels.size()[0], batch_labels.unique().size()[0]).scatter_(1, batch_labels.view(-1, 1), 1)
+        one_hot_labels = torch.zeros(batch_labels.size()[0], batch_labels.unique().size()[0]).scatter_(1, batch_labels.view(-1, 1), 1).to(device)
         loss = criterion(relations, one_hot_labels)
     else:
+        batch_labels = batch_labels.to(device)
         loss = criterion(relations, batch_labels)
 
     model.zero_grad()
@@ -34,37 +37,6 @@ def train_episode(model, sample_dataloader, batch_dataloader, device, criterion,
     optimizer.step()
     lr_scheduler.step(episode)
     return loss
-
-
-def save_checkpoint(model, optimizer, lr_scheduler, episode, args):
-    checkpoint = {'model': model.state_dict(),
-                  'optimizer': optimizer.state_dict(),
-                  'lr_scheduler': lr_scheduler.state_dict(),
-                  'episode': episode,
-                  'args': args}
-    torch.save(checkpoint, args.checkpoint_file)
-
-
-def load_checkpoint(model, optimizer, lr_scheduler, args):
-    checkpoint = torch.load(args.resume)
-    model.load_state_dict(checkpoint['model'])
-    optimizer.load_state_dict(checkpoint['optimizer'])
-    lr_scheduler.load_state_dict(checkpoint['lr_scheduler'])
-    args.start_episode = checkpoint['episode'] + 1
-    print(f'Checkpoint at episode {checkpoint["episode"]} loaded')
-
-
-def save_best(model, args, accuracy):
-    checkpoint = {'model': model.state_dict(),
-                  'args': args,
-                  'accuracy': accuracy}
-    torch.save(checkpoint, args.best_model_file)
-
-
-def load_best(model, args):
-    state = torch.load(args.best_model_file)
-    model.load_state_dict(state['model'])
-    print('Best model loaded')
 
 
 def test_episode(model, sample_dataloader, test_dataloader, device):
@@ -103,14 +75,12 @@ def meta_test(model, task_sampler, device, episodes):
     return test_accuracy
 
 
-def meta_train(model, train_task_sampler, eval_task_sampler, device, criterion, optimizer, lr_scheduler, args):
+def meta_train(model, train_task_sampler, eval_task_sampler, device, criterion, optimizer,
+               lr_scheduler, args, checkpoint):
     print(f"Training on {device}...")
 
     if args.resume:
-        try:
-            best_accuracy = torch.load(args.best_model_file)['accuracy']
-        except OSError:
-            best_accuracy = 0.0
+        best_accuracy = checkpoint.get_saved_accuracy()
     else:
         best_accuracy = 0.0
 
@@ -120,14 +90,15 @@ def meta_train(model, train_task_sampler, eval_task_sampler, device, criterion, 
                              optimizer, lr_scheduler, episode, args)
 
         if (episode % 100 == 0) and (episode > 0):
-            save_checkpoint(model, optimizer, lr_scheduler, episode, args)
+            checkpoint.save(best=False, model=model, optimizer=optimizer, lr_scheduler=lr_scheduler,
+                            episode=episode)
             print(f'episode: {episode} loss {loss.data.item()}')
 
         if (episode % 5000 == 0) and (episode > 0):
             eval_accuracy = meta_test(model, eval_task_sampler, device, args.test_episodes)
 
             if eval_accuracy > best_accuracy:
-                save_best(model, args, eval_accuracy)
+                checkpoint.save(best=True, model=model, accuracy=eval_accuracy, episode=episode)
                 best_accuracy = eval_accuracy
 
 
@@ -149,12 +120,12 @@ def parse_args():
     parser.add_argument('--model_name', type=str, default='default')
     parser.add_argument('--train_folder', type=str)
     parser.add_argument('--test_folder', type=str)
-    parser.add_argument('--resume', type=str, default='', help='resume from checkpoint')
+    parser.add_argument('--resume', action='store_true', help='resume from checkpoint')
     parser.add_argument('--start_episode', type=int, default=0)
+    parser.add_argument('--checkpoints_folder', type=str, default='checkpoints')
     args = parser.parse_args()
 
-    args.checkpoint_file = os.path.join("checkpoints", f"checkpoint_{args.model_name}_{args.class_num}way_{args.sample_num_per_class}shot.tar")
-    args.best_model_file = os.path.join("checkpoints", f"best_{args.model_name}_{args.class_num}way_{args.sample_num_per_class}shot.pt")
+    args.best_model_file = os.path.join(args.checkpoints_folder, f'best_{args.model_name}_{args.class_num}way_{args.sample_num_per_class}shot.pt')
     return args
 
 
@@ -167,12 +138,14 @@ def main(args):
     is_train_mode = args.train_folder is not None and args.test_folder is not None
     is_test_mode = args.train_folder is None and args.test_folder is not None
 
+    checkpoint = Checkpoint(args)
+
     if is_train_mode:
         optimizer = torch.optim.Adam(relation_network.parameters(), lr=args.learning_rate)
         lr_scheduler = StepLR(optimizer, step_size=100000, gamma=0.5)
 
         if args.resume:
-            load_checkpoint(relation_network, optimizer, lr_scheduler, args)
+            checkpoint.load(best=False, model=relation_network, optimizer=optimizer, lr_scheduler=lr_scheduler)
 
         if args.loss_type == 'mse':
             criterion = nn.MSELoss().to(device)
@@ -182,9 +155,9 @@ def main(args):
         train_task_sampler = tg.TaskSampler(args, train=True)
         test_task_sampler = tg.TaskSampler(args, train=False)
 
-        meta_train(relation_network, train_task_sampler, test_task_sampler, device, criterion, optimizer, lr_scheduler, args)
+        meta_train(relation_network, train_task_sampler, test_task_sampler, device, criterion, optimizer, lr_scheduler, args, checkpoint)
     elif is_test_mode:
-        load_best(relation_network, args)
+        checkpoint.load(best=True, model=relation_network)
         test_task_sampler = tg.TaskSampler(args, train=False)
         meta_test(relation_network, test_task_sampler, device, args.test_episodes)
 
