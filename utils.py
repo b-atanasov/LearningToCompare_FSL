@@ -9,7 +9,10 @@ class Checkpoint:
         self.args = args
         self.model_checkpoints_folder = os.path.join(args.checkpoints_folder, args.model_name)
         if not args.resume:
-            rmtree(self.model_checkpoints_folder)
+            try:
+                rmtree(self.model_checkpoints_folder)
+            except FileNotFoundError:
+                pass
         os.makedirs(self.model_checkpoints_folder, exist_ok=True)
         self.last_checkpoint = self.__get_last_saved_checkpoint(best=False)
         self.best_checkpoint = self.__get_last_saved_checkpoint(best=True)
