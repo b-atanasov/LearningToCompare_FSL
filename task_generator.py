@@ -100,6 +100,7 @@ class TaskSampler:
                                             transforms.Normalize(mean=[0.485, 0.456, 0.406],
                                                                  std=[0.229, 0.224, 0.225])])
         dataset = FewShotDataset(image_roots, labels, transform=ds_transforms)
-        loader = DataLoader(dataset, batch_size=num_per_class*self.class_num, shuffle=shuffle)
+        loader = DataLoader(dataset, batch_size=num_per_class*self.class_num, shuffle=shuffle,
+                            num_workers=3, pin_memory=True)
         return loader
         
