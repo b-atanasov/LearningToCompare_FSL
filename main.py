@@ -90,7 +90,7 @@ def meta_train(model, train_task_sampler, eval_task_sampler, device, criterion, 
                              optimizer, lr_scheduler, episode, args)
 
         if (episode % 100 == 0) and (episode > 0):
-            checkpoint.save(best=False, model=model, optimizer=optimizer, lr_scheduler=lr_scheduler,
+            checkpoint.save(model=model, optimizer=optimizer, lr_scheduler=lr_scheduler,
                             episode=episode)
             print(f'episode: {episode} loss {loss.data.item()}')
 
@@ -98,7 +98,7 @@ def meta_train(model, train_task_sampler, eval_task_sampler, device, criterion, 
             eval_accuracy = meta_test(model, eval_task_sampler, device, args.test_episodes)
 
             if eval_accuracy > best_accuracy:
-                checkpoint.save(best=True, model=model, accuracy=eval_accuracy, episode=episode)
+                checkpoint.save_best(model=model, accuracy=eval_accuracy, episode=episode)
                 best_accuracy = eval_accuracy
 
 
@@ -120,9 +120,10 @@ def parse_args():
     parser.add_argument('--model_name', type=str, default='default')
     parser.add_argument('--train_folder', type=str)
     parser.add_argument('--test_folder', type=str)
-    parser.add_argument('--resume', action='store_true', help='resume from checkpoint')
+    parser.add_argument('--resume', action='store_true', help='resume training from checkpoint')
     parser.add_argument('--start_episode', type=int, default=0)
     parser.add_argument('--checkpoints_folder', type=str, default='checkpoints')
+    parser.add_argument('--test', action='store_true')
     args = parser.parse_args()
 
     args.best_model_file = os.path.join(args.checkpoints_folder, f'best_{args.model_name}_{args.class_num}way_{args.sample_num_per_class}shot.pt')
@@ -135,17 +136,14 @@ def main(args):
     relation_network = rln.RelationNetwork(args)
     relation_network = relation_network.to(device)
 
-    is_train_mode = args.train_folder is not None and args.test_folder is not None
-    is_test_mode = args.train_folder is None and args.test_folder is not None
-
     checkpoint = Checkpoint(args)
 
-    if is_train_mode:
+    if not args.test:
         optimizer = torch.optim.Adam(relation_network.parameters(), lr=args.learning_rate)
         lr_scheduler = StepLR(optimizer, step_size=100000, gamma=0.5)
 
         if args.resume:
-            checkpoint.load(best=False, model=relation_network, optimizer=optimizer, lr_scheduler=lr_scheduler)
+            checkpoint.load(model=relation_network, optimizer=optimizer, lr_scheduler=lr_scheduler)
 
         if args.loss_type == 'mse':
             criterion = nn.MSELoss().to(device)
@@ -156,8 +154,8 @@ def main(args):
         test_task_sampler = tg.TaskSampler(args, train=False)
 
         meta_train(relation_network, train_task_sampler, test_task_sampler, device, criterion, optimizer, lr_scheduler, args, checkpoint)
-    elif is_test_mode:
-        checkpoint.load(best=True, model=relation_network)
+    else:
+        checkpoint.load_best(model=relation_network)
         test_task_sampler = tg.TaskSampler(args, train=False)
         meta_test(relation_network, test_task_sampler, device, args.test_episodes)
 

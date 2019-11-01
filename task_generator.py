@@ -101,6 +101,6 @@ class TaskSampler:
                                                                  std=[0.229, 0.224, 0.225])])
         dataset = FewShotDataset(image_roots, labels, transform=ds_transforms)
         loader = DataLoader(dataset, batch_size=num_per_class*self.class_num, shuffle=shuffle,
-                            num_workers=3, pin_memory=True)
+                            num_workers=2, pin_memory=True)
         return loader
         
