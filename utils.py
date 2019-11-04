@@ -84,3 +84,16 @@ class Checkpoint:
         except (OSError, AttributeError):
             accuracy = 0.0
         return accuracy
+
+
+class Accuracy:
+    def __init__(self):
+        self.number_correct_predicitons = 0
+        self.total_number_of_predictions = 0
+
+    def add_batch(self, input, target):
+        self.number_correct_predicitons += (input.argmax(1) == target).sum().data.item()
+        self.total_number_of_predictions += input.size()[0]
+
+    def calculate(self):
+        return self.number_correct_predicitons / self.total_number_of_predictions

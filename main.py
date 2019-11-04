@@ -10,7 +10,7 @@ import numpy as np
 
 import task_generator as tg
 import relation_network as rln
-from utils import Checkpoint
+from utils import Checkpoint, Accuracy
 
 
 def train_episode(model, sample_dataloader, batch_dataloader, device, criterion, optimizer,
@@ -20,15 +20,17 @@ def train_episode(model, sample_dataloader, batch_dataloader, device, criterion,
 
     samples = samples.to(device)
     batches = batches.to(device)
+    batch_labels = batch_labels.to(device)
 
     model.train()
     relations = model(samples, batches)
 
     if args.loss_type == 'mse':
-        one_hot_labels = torch.zeros(batch_labels.size()[0], batch_labels.unique().size()[0]).scatter_(1, batch_labels.view(-1, 1), 1).to(device)
+        one_hot_labels = (torch.zeros(batch_labels.size()[0], batch_labels.unique().size()[0])
+                          .to(device)
+                          .scatter_(1, batch_labels.view(-1, 1), 1))
         loss = criterion(relations, one_hot_labels)
     else:
-        batch_labels = batch_labels.to(device)
         loss = criterion(relations, batch_labels)
 
     model.zero_grad()
@@ -36,7 +38,10 @@ def train_episode(model, sample_dataloader, batch_dataloader, device, criterion,
     torch.nn.utils.clip_grad_norm_(model.parameters(), 0.5)
     optimizer.step()
     lr_scheduler.step(episode)
-    return loss
+
+    accuracy = Accuracy()
+    accuracy.add_batch(relations, batch_labels)
+    return loss, accuracy.calculate()
 
 
 def test_episode(model, sample_dataloader, test_dataloader, device):
@@ -46,18 +51,14 @@ def test_episode(model, sample_dataloader, test_dataloader, device):
 
     total_rewards = 0
     total_predictions = 0
+    accuracy = Accuracy()
     for test_images, test_labels in test_dataloader:
         test_images, test_labels = test_images.to(device), test_labels.to(device)
 
-        predicted_labels = model.forward(sample_images, test_images)
-        predicted_labels = predicted_labels.argmax(1)
+        predicted_labels = model(sample_images, test_images)
+        accuracy.add_batch(predicted_labels, test_labels)
 
-        rewards = (predicted_labels == test_labels).sum().data.item()
-        total_rewards += rewards
-        total_predictions += predicted_labels.size()[0]
-
-    accuracy = total_rewards/1.0/total_predictions
-    return accuracy
+    return accuracy.calculate()
 
 
 def meta_test(model, task_sampler, device, episodes):
@@ -86,13 +87,13 @@ def meta_train(model, train_task_sampler, eval_task_sampler, device, criterion, 
 
     for episode in range(args.start_episode, args.train_episodes):
         sample_dataloader, batch_dataloader = train_task_sampler.sample_task_data()
-        loss = train_episode(model, sample_dataloader, batch_dataloader, device, criterion,
-                             optimizer, lr_scheduler, episode, args)
+        loss, accuracy = train_episode(model, sample_dataloader, batch_dataloader, device,
+                                       criterion, optimizer, lr_scheduler, episode, args)
 
         if (episode % 100 == 0) and (episode > 0):
             checkpoint.save(model=model, optimizer=optimizer, lr_scheduler=lr_scheduler,
                             episode=episode)
-            print(f'episode: {episode} loss {loss.data.item()}')
+            print(f'episode {episode}: loss {loss.data.item()}, accuracy {accuracy}')
 
         if (episode % 5000 == 0) and (episode > 0):
             eval_accuracy = meta_test(model, eval_task_sampler, device, args.test_episodes)
