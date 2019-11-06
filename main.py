@@ -1,6 +1,7 @@
 import argparse
 from functools import partial
 import os
+import logging
 
 import torch
 import torch.nn as nn
@@ -10,7 +11,7 @@ import numpy as np
 
 import task_generator as tg
 import relation_network as rln
-from utils import Checkpoint, Accuracy
+from utils import Checkpoint, Accuracy, configure_logging
 
 
 def train_episode(model, sample_dataloader, batch_dataloader, device, criterion, optimizer,
@@ -62,7 +63,7 @@ def test_episode(model, sample_dataloader, test_dataloader, device):
 
 
 def meta_test(model, task_sampler, device, episodes):
-    print("Testing...")
+    logging.info('Testing...')
     accuracies = []
     model.eval()
     with torch.no_grad():
@@ -72,13 +73,13 @@ def meta_test(model, task_sampler, device, episodes):
             accuracies.append(accuracy)
 
     test_accuracy = np.array(accuracies).mean()
-    print("test accuracy:", test_accuracy)
+    logging.info("testing: avg_accuracy %.2f", test_accuracy)
     return test_accuracy
 
 
 def meta_train(model, train_task_sampler, eval_task_sampler, device, criterion, optimizer,
                lr_scheduler, args, checkpoint):
-    print(f"Training on {device}...")
+    logging.info(f'Training on {device}...')
 
     if args.resume:
         best_accuracy = checkpoint.get_saved_accuracy()
@@ -93,7 +94,7 @@ def meta_train(model, train_task_sampler, eval_task_sampler, device, criterion, 
         if (episode % 100 == 0) and (episode > 0):
             checkpoint.save(model=model, optimizer=optimizer, lr_scheduler=lr_scheduler,
                             episode=episode)
-            print(f'episode {episode}: loss {loss.data.item()}, accuracy {accuracy}')
+            logging.info('training: episode %d loss %.4f accuracy %.2f', episode, loss.data.item(), accuracy)
 
         if (episode % 5000 == 0) and (episode > 0):
             eval_accuracy = meta_test(model, eval_task_sampler, device, args.test_episodes)
@@ -118,26 +119,24 @@ def parse_args():
     parser.add_argument('-lr', '--learning_rate', type=float, default=0.001)
     parser.add_argument('--disable_cuda', action='store_true')
     parser.add_argument('--input_channels', type=int, default=3)
-    parser.add_argument('--model_name', type=str, default='default')
     parser.add_argument('--train_folder', type=str)
     parser.add_argument('--test_folder', type=str)
     parser.add_argument('--resume', action='store_true', help='resume training from checkpoint')
     parser.add_argument('--start_episode', type=int, default=0)
-    parser.add_argument('--checkpoints_folder', type=str, default='checkpoints')
     parser.add_argument('--test', action='store_true')
     args = parser.parse_args()
-
-    args.best_model_file = os.path.join(args.checkpoints_folder, f'best_{args.model_name}_{args.class_num}way_{args.sample_num_per_class}shot.pt')
     return args
 
 
 def main(args):
-    device = torch.device("cuda") if not args.disable_cuda and torch.cuda.is_available() else torch.device("cpu")
+    log_dir = configure_logging(args)
+    logging.info(args)
 
+    device = torch.device("cuda") if not args.disable_cuda and torch.cuda.is_available() else torch.device("cpu")
     relation_network = rln.RelationNetwork(args)
     relation_network = relation_network.to(device)
 
-    checkpoint = Checkpoint(args)
+    checkpoint = Checkpoint(args, log_dir)
 
     if not args.test:
         optimizer = torch.optim.Adam(relation_network.parameters(), lr=args.learning_rate)

@@ -1,13 +1,39 @@
 import os
 from glob import glob
 from shutil import rmtree
+import logging
 import torch
 
 
+def create_log_dir(args):
+    dir_path = '{class_num}way_{sample_num_per_class}shot_{backbone}_{img_size}_{loss_type}'
+    dir_path = dir_path.format(**vars(args))
+    dir_path = os.path.join('logs', dir_path)
+    if not (args.resume or args.test):
+        try: 
+            rmtree(dir_path)
+        except FileNotFoundError:
+            pass
+    os.makedirs(dir_path, exist_ok=True)
+    return dir_path
+
+
+def configure_logging(args):
+    log_dir = create_log_dir(args)
+    log_file = 'test.log' if args.test else 'train.log'
+    log_file = os.path.join(log_dir, log_file)
+    file_handler = logging.FileHandler(log_file)
+    console_handler = logging.StreamHandler()
+    handlers = [file_handler, console_handler]
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s.%(msecs)03d %(message)s', handlers=handlers,
+                        datefmt='%Y-%m-%dT%H:%M:%S')
+    return log_dir
+
+
 class Checkpoint:
-    def __init__(self, args):
+    def __init__(self, args, log_dir):
         self.args = args
-        self.checkpoints_folder = self.__create_folder()
+        self.checkpoints_folder = self.__create_folder(log_dir)
 
         self.__file_sort_key = lambda path: int(os.path.basename(path).split('_')[0])
         self.__checkpoint_file_pattern = os.path.join(self.checkpoints_folder, '{}_chkpt.tar')
@@ -16,14 +42,8 @@ class Checkpoint:
         self.last_checkpoint = self.__get_last_saved_file(self.__checkpoint_file_pattern)
         self.best_checkpoint = self.__get_last_saved_file(self.__best_file_pattern)
 
-    def __create_folder(self):
-        folder = '{model_name}_{class_num}way_{sample_num_per_class}shot'.format(**vars(self.args))
-        folder = os.path.join(self.args.checkpoints_folder, folder)
-        if not (self.args.resume or self.args.test):
-            try:
-                rmtree(folder)
-            except FileNotFoundError:
-                pass
+    def __create_folder(self, log_dir):
+        folder = os.path.join(log_dir, 'checkpoints')
         os.makedirs(folder, exist_ok=True)
         return folder
 
@@ -75,7 +95,7 @@ class Checkpoint:
 
         for k, v in kwargs.items():
             v.load_state_dict(checkpoint[k])
-        print(f'Checkpoint at episode {checkpoint["episode"]} loaded')
+        logging.info('Checkpoint at episode %d loaded', checkpoint["episode"])
         return checkpoint
 
     def get_saved_accuracy(self):
