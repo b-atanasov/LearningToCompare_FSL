@@ -1,25 +1,47 @@
 import os
 from glob import glob
 from shutil import rmtree
+import sys
 import logging
 import torch
 
 
-def create_log_dir(args):
-    dir_path = '{class_num}way_{sample_num_per_class}shot_{backbone}_{img_size}_{loss_type}'
-    dir_path = dir_path.format(**vars(args))
-    dir_path = os.path.join('logs', dir_path)
-    if not (args.resume or args.test):
-        try: 
-            rmtree(dir_path)
-        except FileNotFoundError:
-            pass
-    os.makedirs(dir_path, exist_ok=True)
-    return dir_path
+class LogDir:
+    def __init__(self, args):
+        self.args = args
+        self.__create()
+
+    def __create(self):
+        path = self.get_path()
+        path_exists = os.path.exists(path)
+        if path_exists and not (self.args.resume or self.args.test):
+            self.__delete(path)    
+        os.makedirs(path, exist_ok=True)
+        return path
+
+    def get_path(self):
+        path = '{class_num}way_{sample_num_per_class}shot_{backbone}_{img_size}_{loss_type}'
+        path = path.format(**vars(self.args))
+        path = os.path.join('logs', path)
+        return path
+
+    def __delete(self, path):
+        if self.__confirm_delete(path):
+            rmtree(path)
+        else:
+            sys.exit()
+
+    def __confirm_delete(self, path):
+        input_text = f'Are you sure you want to delete the checkpoints in {path}? (y/n)'
+        while True:
+            confirmation = input(input_text).lower()
+            if confirmation in ['y', 'n']:
+                break
+        return confirmation == 'y'
 
 
 def configure_logging(args):
-    log_dir = create_log_dir(args)
+    log_dir = LogDir(args).get_path()
     log_file = 'test.log' if args.test else 'train.log'
     log_file = os.path.join(log_dir, log_file)
     file_handler = logging.FileHandler(log_file)
