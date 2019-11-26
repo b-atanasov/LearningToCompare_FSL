@@ -6,6 +6,7 @@ The code in this implementation is considerably reorganized, updated to PyTorch 
 * Only one optimizer is used for the whole network. (In the original code there are two separate optimizers for the relation and embedding networks.)
 * Custom sampling is removed.
 * ResNet18 backbone is added (in similar way to [Finding Task-Relevant Features for Few-Shot Learning by Category Traversal](https://arxiv.org/pdf/1905.11116.pdf) but using the ResNet basic block instead of the bottleneck block).
+* Category traversal module is added. ([Finding Task-Relevant Features for Few-Shot Learning by Category Traversal](https://arxiv.org/pdf/1905.11116.pdf))
 * Cross-entropy loss is added.
 
 ## Data

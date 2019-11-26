@@ -33,6 +33,7 @@ class FewShotDataset(Dataset):
 
 class TaskSampler:
     def __init__(self, args, train=True):
+        self.train = train
         self.metadataset_folder = args.train_folder if train else args.test_folder
         self.class_num = args.class_num
         self.train_num = args.sample_num_per_class
@@ -94,11 +95,20 @@ class TaskSampler:
         return [labels_index[os.path.dirname(root)] for root in roots]
     
     def __get_data_loader(self, image_roots, labels, num_per_class, split, shuffle):
-        ds_transforms = transforms.Compose([transforms.RandomResizedCrop(self.img_size),
-                                            transforms.RandomHorizontalFlip(),
-                                            transforms.ToTensor(),
-                                            transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                                                 std=[0.229, 0.224, 0.225])])
+        if self.train:
+            ds_transforms = transforms.Compose([transforms.Resize((self.img_size + 20, self.img_size + 20)),
+                                                transforms.RandomCrop(self.img_size),
+                                                transforms.RandomHorizontalFlip(),
+                                                transforms.ColorJitter(brightness=.1, contrast=.1, saturation=.1, hue=.1),
+                                                transforms.ToTensor(),
+                                                transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                                                    std=[0.229, 0.224, 0.225])])
+        else:
+            ds_transforms = transforms.Compose([transforms.Resize((self.img_size + 20, self.img_size + 20)),
+                                                transforms.RandomCrop(self.img_size),
+                                                transforms.ToTensor(),
+                                                transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                                                    std=[0.229, 0.224, 0.225])])
         dataset = FewShotDataset(image_roots, labels, transform=ds_transforms)
         loader = DataLoader(dataset, batch_size=num_per_class*self.class_num, shuffle=shuffle,
                             num_workers=2, pin_memory=True)

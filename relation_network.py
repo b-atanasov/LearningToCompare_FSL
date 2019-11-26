@@ -77,13 +77,26 @@ class RelationModuleOriginal(nn.Module):
         return out
 
 
+def make_resnet_layers(inplanes, layer_blocks, layer_planes, layer_strides):
+    resnet = models.ResNet(models.resnet.BasicBlock, [2, 2, 2, 2])
+    resnet.inplanes = inplanes
+    
+    layers = []
+    for blocks, planes, stride in zip(layer_blocks, layer_planes, layer_strides):
+        layer = resnet._make_layer(models.resnet.BasicBlock, planes=planes, blocks=blocks, stride=stride)
+        layers.append(layer)
+    
+    return nn.Sequential(*layers)
+
+
 class RelationModule(nn.Module):
     def __init__(self, conv_depth, args):
         super().__init__()
-        resnet = models.ResNet(models.resnet.BasicBlock, [2, 2, 2, 2])
-        resnet.inplanes = 2 * conv_depth
-        self.layer1 = resnet._make_layer(models.resnet.BasicBlock, planes=128, blocks=2, stride=2)
-        self.layer2 = resnet._make_layer(models.resnet.BasicBlock, planes=64, blocks=2, stride=1)
+        self.resnet_layers = make_resnet_layers(inplanes=2*conv_depth,
+                                                layer_blocks=[2, 2],
+                                                layer_planes=[128, 64],
+                                                layer_strides=[1, 1]) # change to layer_strides=[2, 1]
+        
         if args.img_size == 224:
             fc1_in = 64 * 7 * 7
         elif args.img_size == 84:
@@ -97,8 +110,7 @@ class RelationModule(nn.Module):
         self.loss_type = args.loss_type
 
     def forward(self, x):
-        out = self.layer1(x)
-        out = self.layer2(out)
+        out = self.resnet_layers(x)
         out = out.view(out.size(0), -1)
         out = self.fc1(out)
         # out = self.batch_norm(out)
@@ -109,6 +121,47 @@ class RelationModule(nn.Module):
         return out
 
 
+class CategoryTraversal(nn.Module):
+    def __init__(self, inplanes, class_num, sample_num_per_class):
+        super().__init__()
+        self.class_num = class_num
+        self.sample_num_per_class = sample_num_per_class
+        
+        layer_blocks = [3, 2]
+        layer_planes = [128, 64]
+        concentrator_strides = [2, 1]
+        projector_strides = [1, 1]
+        self.concentrator_layers = make_resnet_layers(inplanes,
+                                                      layer_blocks,
+                                                      layer_planes,
+                                                      concentrator_strides)
+        self.projector_layers = make_resnet_layers(layer_planes[-1] * class_num,
+                                                   layer_blocks,
+                                                   layer_planes,
+                                                   projector_strides)
+        self.reshaper = make_resnet_layers(inplanes,
+                                           layer_blocks,
+                                           layer_planes,
+                                           concentrator_strides)
+        
+    def forward(self, x):
+        out = self.concentrator(x)
+        out = self.projector(out)
+        return out
+        
+    def concentrator(self, x):
+        out = self.concentrator_layers(x)
+        out = out.view(self.class_num, self.sample_num_per_class, *out.size()[1:])
+        out = out.mean(1)
+        return out
+    
+    def projector(self, x):
+        out = x.view(1, -1, *x.size()[2:])
+        out = self.projector_layers(out)
+        out = F.softmax(out, dim=1)
+        return out
+
+
 class RelationNetwork(nn.Module):
     def __init__(self, args):
         super().__init__()
@@ -116,6 +169,8 @@ class RelationNetwork(nn.Module):
         self.sample_num_per_class = args.sample_num_per_class
         self.query_num_per_class = args.batch_num_per_class
         self.encoder = self.__get_encoder(args)
+        if args.enable_ctm:
+            self.__add_ctm()
         self.relation_module = self.__get_relation_module(args)
 
     def __get_encoder(self, args):
@@ -125,20 +180,41 @@ class RelationNetwork(nn.Module):
             resnet18 = models.resnet18()
             return nn.Sequential(*list(resnet18.children())[:-3])
 
+    def __add_ctm(self):
+        inplanes = self.__get_out_channels(self.encoder)
+        self.category_traversal = CategoryTraversal(inplanes, self.class_num, self.sample_num_per_class)
+        self.reshaper = self.category_traversal.reshaper
+
+    def __get_out_channels(self, module):
+        out_channels = [layer.out_channels for layer in module.modules()
+                        if isinstance(layer, nn.Conv2d)][-1]
+        return out_channels
+
     def __get_relation_module(self, args):
-        encoder_output_channels = [m.out_channels for m in self.encoder.modules()
-                                   if isinstance(m, nn.Conv2d)][-1]
+        if args.enable_ctm:
+            inplanes = self.__get_out_channels(self.reshaper)
+        else:
+            inplanes = self.__get_out_channels(self.encoder)
+        
         if args.backbone == 'ResNet18':
-            return RelationModule(encoder_output_channels, args)
+            return RelationModule(inplanes, args)
         elif args.backbone == 'Conv4':
-            return RelationModuleOriginal(encoder_output_channels, args)
+            return RelationModuleOriginal(inplanes, args)
 
     def forward(self, sample, query):
         sample_features = self.encoder(sample)
-        sample_features = sample_features.view(self.class_num, self.sample_num_per_class, *sample_features.shape[1:])
-        sample_features = sample_features.mean(1)
         query_features = self.encoder(query)
 
+        if hasattr(self, 'category_traversal'):
+            feature_mask = self.category_traversal(sample_features)
+
+            sample_features = feature_mask * self.reshaper(sample_features)
+            query_features = feature_mask * self.reshaper(query_features)
+            
+
+        sample_features = sample_features.view(self.class_num, self.sample_num_per_class, *sample_features.shape[1:])
+        sample_features = sample_features.mean(1)
+        
         sample_features_ext = sample_features.unsqueeze(0).repeat(query.size()[0], 1, 1, 1, 1)
         query_features_ext = query_features.unsqueeze(1).repeat(1, self.class_num, 1, 1, 1)
         relation_pairs = torch.cat((sample_features_ext, query_features_ext), 2).view(-1, 2*sample_features_ext.shape[-3], *sample_features_ext.shape[-2:])

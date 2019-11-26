@@ -107,6 +107,7 @@ def meta_train(model, train_task_sampler, eval_task_sampler, device, criterion, 
 def parse_args():
     parser = argparse.ArgumentParser(description='Few Shot Image Recognition')
     parser.add_argument('--backbone', type=str, choices=['Conv4', 'ResNet18'], default='ResNet18')
+    parser.add_argument('--enable_ctm', action='store_true', help='Add category traversal module')
     parser.add_argument('--img_size', type=int, choices=[84, 224], default=84,
                         help='input images will be cropped to this size')
     parser.add_argument('--loss_type', type=str, choices=['mse', 'cross-entropy'], default='mse')

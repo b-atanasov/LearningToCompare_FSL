@@ -22,6 +22,8 @@ class LogDir:
     def get_path(self):
         path = '{class_num}way_{sample_num_per_class}shot_{backbone}_{img_size}_{loss_type}'
         path = path.format(**vars(self.args))
+        if self.args.enable_ctm:
+            path += '_ctm'
         path = os.path.join('logs', path)
         return path
 
