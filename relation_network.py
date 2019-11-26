@@ -95,19 +95,29 @@ class RelationModule(nn.Module):
         self.resnet_layers = make_resnet_layers(inplanes=2*conv_depth,
                                                 layer_blocks=[2, 2],
                                                 layer_planes=[128, 64],
-                                                layer_strides=[1, 1]) # change to layer_strides=[2, 1]
+                                                layer_strides=[2, 1])
         
-        if args.img_size == 224:
-            fc1_in = 64 * 7 * 7
-        elif args.img_size == 84:
-            fc1_in = 64 * 3 * 3
-        fc1_out = fc1_in // 2
+        fc1_in, fc1_out = self.__get_linear_feature_sizes(args)
         self.fc1 = nn.Linear(fc1_in, fc1_out)
         # self.batch_norm = nn.BatchNorm1d(fc1_out)
         self.fc2 = nn.Linear(fc1_out, 1)
         for m in self.modules():
             initialize_weights(m)
         self.loss_type = args.loss_type
+
+    def __get_linear_feature_sizes(self, args):
+        if args.img_size == 224:
+            if args.enable_ctm:
+                fc1_in = 64 * 4 * 4
+            else:
+                fc1_in = 64 * 7 * 7
+        elif args.img_size == 84:
+            if args.enable_ctm:
+                fc1_in = 64 * 2 * 2
+            else:
+                fc1_in = 64 * 3 * 3 
+        fc1_out = fc1_in // 2
+        return fc1_in, fc1_out
 
     def forward(self, x):
         out = self.resnet_layers(x)
