@@ -106,25 +106,35 @@ def meta_train(model, train_task_sampler, eval_task_sampler, device, criterion, 
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Few Shot Image Recognition')
-    parser.add_argument('--backbone', type=str, choices=['Conv4', 'ResNet18'], default='ResNet18')
-    parser.add_argument('--enable_ctm', action='store_true', help='Add category traversal module')
+    parser.add_argument('--train_folder', type=str, help='path to training data')
+    parser.add_argument('--test_folder', type=str, help='path to test|validation data')
+    parser.add_argument('--backbone', type=str, choices=['Conv4', 'ResNet18'], default='ResNet18',
+                        help='feature extractor architecture ')
+    parser.add_argument('--enable_ctm', action='store_true', help='add category traversal module')
     parser.add_argument('--img_size', type=int, choices=[84, 224], default=84,
-                        help='input images will be cropped to this size')
-    parser.add_argument('--loss_type', type=str, choices=['mse', 'cross-entropy'], default='mse')
-    parser.add_argument('--class_num', type=int, default=5)
-    parser.add_argument('--sample_num_per_class', type=int, default=5)
-    parser.add_argument('--batch_num_per_class', type=int, default=10)
-    parser.add_argument('--test_batch_num_per_class', type=int, default=15)
-    parser.add_argument('--train_episodes', type=int, default=500000)
-    parser.add_argument('--test_episodes', type=int, default=600)
-    parser.add_argument('-lr', '--learning_rate', type=float, default=0.001)
-    parser.add_argument('--disable_cuda', action='store_true')
-    parser.add_argument('--input_channels', type=int, default=3)
-    parser.add_argument('--train_folder', type=str)
-    parser.add_argument('--test_folder', type=str)
-    parser.add_argument('--resume', action='store_true', help='resume training from checkpoint')
-    parser.add_argument('--start_episode', type=int, default=0)
-    parser.add_argument('--test', action='store_true')
+                        help='input images will be resized to either 84x84 or 224x224')
+    parser.add_argument('--loss_type', type=str, choices=['mse', 'cross-entropy'],
+                        default='cross-entropy',
+                        help='choose between MSE or cross-entropy loss')
+    parser.add_argument('--class_num', type=int, default=5, help='number of classes')
+    parser.add_argument('--sample_num_per_class', type=int, default=5,
+                        help='number of images per class in the support set during meta-training')
+    parser.add_argument('--batch_num_per_class', type=int, default=10,
+                        help='number of images per class in the query set during meta-training')
+    parser.add_argument('--test_batch_num_per_class', type=int, default=15,
+                        help='number of images per class in the query set during meta-testing')
+    parser.add_argument('--train_episodes', type=int, default=500000,
+                        help='number of training episodes')
+    parser.add_argument('--test_episodes', type=int, default=600, help='number of test_episodes')
+    parser.add_argument('-lr', '--learning_rate', type=float, default=0.001, help='learning rate')
+    parser.add_argument('--disable_cuda', action='store_true',
+                        help='disable training/inference on gpu')
+    parser.add_argument('--input_channels', type=int, default=3, help='input image channels')
+    parser.add_argument('--resume', action='store_true',
+                        help='resume training from the last saved checkpoint')
+    parser.add_argument('--start_episode', type=int, default=0, help='start episode')
+    parser.add_argument('--test', action='store_true',
+                        help='load the best saved model and test it on the data in TEST_FOLDER')
     args = parser.parse_args()
     return args
 
